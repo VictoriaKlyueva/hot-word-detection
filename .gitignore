@@ -1,0 +1,11 @@
+# data
+data
+
+# Virtual enviroment
+.venv
+
+# Security
+.env
+
+# IDE settings
+.idea
