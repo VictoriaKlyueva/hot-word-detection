@@ -1,8 +1,14 @@
 # data
 data
 
+# ipynb_checkpoints
+/notebooks/.ipynb_checkpoints/
+
 # Virtual enviroment
 .venv
+
+# Models
+models
 
 # Security
 .env
