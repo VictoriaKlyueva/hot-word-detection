@@ -112,7 +112,7 @@ class StonesModel:
                 outputs = self.model(input_tensor)
                 probabilities = torch.softmax(outputs, dim=1)
                 prediction = torch.argmax(probabilities, dim=1).item()
-                confidence = probabilities[0][prediction].item()
+                confidence = probabilities[0][1].item()
 
             return prediction, confidence
         except Exception as e:
@@ -137,7 +137,7 @@ class StonesModel:
             end_time = end / SAMPLE_RATE
             yield window, start_time, end_time
 
-    def process_audio_file(self, audio_path, output_dir=None, threshold=0.98):
+    def process_audio_file(self, audio_path, output_dir=None, threshold=0.9):
         """
         Обработка аудиофайла: детекция и сохранение найденных фрагментов
 
