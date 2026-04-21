@@ -6,6 +6,7 @@ import numpy as np
 import soundfile as sf
 import asyncio
 import sys
+import subprocess
 from pathlib import Path
 
 from src.constants import MODEL_PATH, EXTRACTED_PATH, SAMPLE_RATE, WINDOW_DURATION, HOP_DURATION, RADIO_URL, THRESHOLD
@@ -194,8 +195,6 @@ class StonesModel:
         Returns:
             int: количество найденных фрагментов
         """
-        import subprocess
-
         if output_dir is None:
             output_dir = EXTRACTED_PATH / 'radio'
 
