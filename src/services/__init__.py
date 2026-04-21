@@ -1,5 +1,4 @@
-from src.model.model import StonesModel
 from src.services.audio_service import AudioService
 from src.services.radio_service import RadioService
 
-__all__ = ["StonesModel", "AudioService", "RadioService"]
+__all__ = ["AudioService", "RadioService"]
