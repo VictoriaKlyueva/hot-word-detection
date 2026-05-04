@@ -40,9 +40,9 @@ class RadioService:
             window = buffer[:self.window_samples]
             prediction, confidence = self.model.predict(window)
             
-            logger.info(f"Position: {stream_position:.2f}s, Prediction: {prediction}, Confidence: {confidence:.2f}")
-            
             if prediction == 1 and confidence >= threshold:
+                logger.info(f"Position: {stream_position:.2f}s, Confidence: {confidence:.2f}")
+
                 found_count += 1
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
                 output_name = f"stones_{timestamp}_{stream_position:.2f}s_conf{confidence:.2f}.wav"
