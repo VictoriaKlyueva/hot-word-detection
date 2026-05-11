@@ -128,7 +128,6 @@ CNN-based model for audio classification using MFCC features:
 | WINDOW_DURATION | 1.0 | Window size in seconds |
 | HOP_DURATION | 0.5 | Hop size in seconds |
 | THRESHOLD | 0.88 | Confidence threshold |
-| RADIO_DURATION | 60.0 | Radio listening duration |
 
 ## Author
 

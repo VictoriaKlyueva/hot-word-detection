@@ -6,6 +6,7 @@ requires-python = ">=3.10"
 dependencies = [
     "gtts>=2.5.4",
     "librosa>=0.10.0",
+    "miniaudio>=1.59",
     "numpy>=1.22.0",
     "pydub>=0.25.0",
     "requests>=2.28.0",

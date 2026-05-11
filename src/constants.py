@@ -6,6 +6,5 @@ EXTRACTED_PATH = Path('data/extracted')
 SAMPLE_RATE = 16000
 WINDOW_DURATION = 1.0
 HOP_DURATION = 0.5
-RADIO_URL = 'https://radio.maslovka-home.ru/soundcheck'
-RADIO_DURATION = 86400.0
+RADIO_URL = 'https://radio.maslovka-home.ru/thanosshow'
 THRESHOLD = 0.88

@@ -1,19 +1,18 @@
-import asyncio
-import subprocess
-import sys
+import signal
 import time
 from pathlib import Path
 from typing import Optional
 
+import miniaudio
 import numpy as np
 import soundfile as sf
 
-from src.constants import EXTRACTED_PATH, HOP_DURATION, RADIO_DURATION, RADIO_URL, SAMPLE_RATE, THRESHOLD, WINDOW_DURATION
+from src.constants import EXTRACTED_PATH, HOP_DURATION, RADIO_URL, SAMPLE_RATE, THRESHOLD, WINDOW_DURATION
 from src.utils.logger import logger
 
 
 class RadioService:
-    """Service for radio stream processing."""
+    """Service for radio stream processing using miniaudio."""
     
     def __init__(self, model, sample_rate: int = SAMPLE_RATE):
         self.model = model
@@ -21,48 +20,40 @@ class RadioService:
         self.window_samples = int(sample_rate * WINDOW_DURATION)
         self.hop_samples = int(sample_rate * HOP_DURATION)
     
-    def _build_ffmpeg_cmd(self, url: str) -> list:
-        return [
-            'ffmpeg',
-            '-i', url,
-            '-loglevel', 'warning',
-            '-f', 's16le',
-            '-acodec', 'pcm_s16le',
-            '-ar', str(self.sample_rate),
-            '-ac', '1',
-            '-'
-        ]
-    
     def _process_buffer(self, buffer: np.ndarray, stream_position: float,
-                        threshold: float, output_dir: Path, found_count: int) -> tuple:
+                        threshold: float, output_dir: Path, found_count: int,
+                        last_predict_log: float) -> tuple:
         """Process audio buffer with sliding window."""
         while len(buffer) >= self.window_samples:
             window = buffer[:self.window_samples]
             prediction, confidence = self.model.predict(window)
+            logger.debug(f"Predict: pos={stream_position:.2f}s, class={prediction}, conf={confidence:.3f}")
+            
+            now = time.time()
+            if now - last_predict_log >= 10.0:
+                logger.info(f"Last predict: pos={stream_position:.2f}s, class={prediction}, conf={confidence:.3f}")
+                last_predict_log = now
             
             if prediction == 1 and confidence >= threshold:
-                logger.info(f"Position: {stream_position:.2f}s, Confidence: {confidence:.2f}")
-
                 found_count += 1
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
                 output_name = f"stones_{timestamp}_{stream_position:.2f}s_conf{confidence:.2f}.wav"
                 sf.write(output_dir / output_name, window, self.sample_rate)
-                logger.info(f"Found at {stream_position:.2f}s: {output_name}")
+                logger.info(f"DETECTED at {stream_position:.2f}s: confidence={confidence:.2f}, saved={output_name}")
             
             buffer = buffer[self.hop_samples:]
             stream_position += HOP_DURATION
         
-        return buffer, stream_position, found_count
+        return buffer, stream_position, found_count, last_predict_log
     
     def listen(self, output_dir: Optional[Path] = None, threshold: float = THRESHOLD,
-               duration: float = RADIO_DURATION, url: str = RADIO_URL) -> int:
+               url: str = RADIO_URL) -> int:
         """
         Listen to radio stream and detect hot words.
         
         Args:
             output_dir: Directory for saving detected fragments
             threshold: Confidence threshold for detection
-            duration: Listening duration in seconds
             url: Radio stream URL
         
         Returns:
@@ -77,135 +68,59 @@ class RadioService:
         
         buffer = np.array([], dtype=np.float32)
         found_count = 0
-        start_time = time.time()
         stream_position = 0.0
-        chunk_size = 8000
+        total_bytes = 0
+        last_data_log = 0.0
+        last_predict_log = 0.0
         
-        process = None
-        try:
-            logger.info("Starting ffmpeg decoder...")
-            process = subprocess.Popen(
-                self._build_ffmpeg_cmd(url),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=0
-            )
-            
-            logger.info("Warming up model...")
-            self.model.predict(np.zeros(self.window_samples, dtype=np.float32))
-            logger.info("Model ready. Listening...")
-            
-            while True:
-                if (time.time() - start_time) >= duration:
-                    logger.info(f"Duration limit reached: {duration}s")
-                    break
+        logger.info("Warming up model...")
+        self.model.predict(np.zeros(self.window_samples, dtype=np.float32))
+        logger.info("Model ready. Listening...")
+        
+        client = None
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        
+        while True:
+            try:
+                logger.info(f"Connecting to radio stream: {url}")
+                client = miniaudio.IceCastClient(url)
+                logger.info("Connected. Decoding stream...")
                 
-                if process.poll() is not None:
-                    logger.error("ffmpeg process ended unexpectedly")
-                    break
-                
-                raw_data = process.stdout.read(chunk_size)
-                if not raw_data:
-                    logger.warning("No data received from stream")
-                    break
-                
-                samples = np.frombuffer(raw_data, dtype=np.int16).astype(np.float32) / 32768.0
-                buffer = np.concatenate([buffer, samples])
-                
-                buffer, stream_position, found_count = self._process_buffer(
-                    buffer, stream_position, threshold, output_dir, found_count
+                stream = miniaudio.stream_any(
+                    client,
+                    source_format=miniaudio.FileFormat.MP3,
+                    output_format=miniaudio.SampleFormat.SIGNED16,
+                    nchannels=1,
+                    sample_rate=self.sample_rate,
+                    frames_to_read=self.hop_samples
                 )
-        
-        except KeyboardInterrupt:
-            logger.info("\nStopped by user")
-        except FileNotFoundError:
-            logger.error("ffmpeg not found")
-        except Exception as e:
-            logger.error(f"Error: {e}")
-        finally:
-            if process:
-                process.terminate()
-                process.wait()
-            logger.info(f"Total found: {found_count} fragments")
-            logger.info(f"Stream duration: {stream_position:.2f}s")
-        
-        return found_count
-    
-    async def listen_async(self, output_dir: Optional[Path] = None, threshold: float = THRESHOLD,
-                           duration: float = RADIO_DURATION, url: str = RADIO_URL) -> int:
-        """
-        Async version of radio stream listening.
-        
-        Args:
-            output_dir: Directory for saving detected fragments
-            threshold: Confidence threshold for detection
-            duration: Listening duration in seconds
-            url: Radio stream URL
-        
-        Returns:
-            Number of detected fragments
-        """
-        output_dir = Path(output_dir or EXTRACTED_PATH / "radio")
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        logger.info(f"Starting radio stream: {url}")
-        logger.info(f"Output directory: {output_dir}")
-        logger.info(f"Threshold: {threshold}")
-        
-        buffer = np.array([], dtype=np.float32)
-        found_count = 0
-        start_time = time.time()
-        stream_position = 0.0
-        chunk_size = 16000
-        
-        process = None
-        try:
-            logger.info("Starting ffmpeg decoder...")
-            process = await asyncio.create_subprocess_exec(
-                *self._build_ffmpeg_cmd(url),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            logger.info("Warming up model...")
-            self.model.predict(np.zeros(self.window_samples, dtype=np.float32))
-            logger.info("Model ready. Listening...")
-            
-            while True:
-                if (time.time() - start_time) >= duration:
-                    logger.info(f"Duration limit reached: {duration}s")
-                    break
                 
-                if process.returncode is not None:
-                    logger.error("ffmpeg process ended unexpectedly")
-                    break
+                for frames in stream:
+                    samples = np.array(frames, dtype=np.float32) / 32768.0
+                    buffer = np.concatenate([buffer, samples])
+                    
+                    total_bytes += len(frames) * 2
+                    now = time.time()
+                    if now - last_data_log >= 10.0:
+                        logger.info(f"Receiving data: {total_bytes / 1024:.1f} KB total, buffer={len(buffer)} samples, position={stream_position:.2f}s")
+                        last_data_log = now
+                    
+                    buffer, stream_position, found_count, last_predict_log = self._process_buffer(
+                        buffer, stream_position, threshold, output_dir, found_count, last_predict_log
+                    )
+                    
+                    if len(buffer) > self.window_samples * 10:
+                        buffer = buffer[-self.window_samples * 5:]
                 
-                try:
-                    raw_data = await asyncio.wait_for(process.stdout.read(chunk_size), timeout=1.0)
-                except asyncio.TimeoutError:
-                    continue
-                
-                if not raw_data:
-                    continue
-                
-                samples = np.frombuffer(raw_data, dtype=np.int16).astype(np.float32) / 32768.0
-                buffer = np.concatenate([buffer, samples])
-                
-                buffer, stream_position, found_count = self._process_buffer(
-                    buffer, stream_position, threshold, output_dir, found_count
-                )
-        
-        except KeyboardInterrupt:
-            logger.info("\nStopped by user")
-        except FileNotFoundError:
-            logger.error("ffmpeg not found")
-        except Exception as e:
-            logger.error(f"Error: {e}")
-        finally:
-            if process:
-                process.terminate()
-                await process.wait()
-            logger.info(f"Total found: {found_count} fragments")
-            logger.info(f"Stream duration: {stream_position:.2f}s")
-        
-        return found_count
+                client.close()
+                client = None
+                logger.info("Stream ended. Reconnecting in 10s...")
+                time.sleep(10.0)
+            except KeyboardInterrupt:
+                if client:
+                    client.close()
+                logger.info("Stopped by user")
+                return found_count
+            except Exception:
+                logger.info("Connection error. Reconnecting in 10s...")
+                time.sleep(10.0)
