@@ -5,7 +5,7 @@ import librosa
 import numpy as np
 import soundfile as sf
 
-from src.constants import EXTRACTED_PATH, HOP_DURATION, SAMPLE_RATE, WINDOW_DURATION
+from src.constants import EXTRACTED_PATH, HOP_DURATION, SAMPLE_RATE, SAVE_OFFSET, WINDOW_DURATION
 from src.utils.logger import logger
 
 
@@ -86,7 +86,8 @@ class AudioService:
             return None
     
     def extract_windows(self, audio_path: Path, window_duration: float = WINDOW_DURATION,
-                        hop_duration: float = HOP_DURATION) -> Generator[tuple, None, None]:
+                        hop_duration: float = HOP_DURATION,
+                        save_offset: float = SAVE_OFFSET) -> Generator[tuple, None, None]:
         """
         Extract sliding windows from audio file.
         
@@ -94,20 +95,25 @@ class AudioService:
             audio_path: Path to audio file
             window_duration: Window duration in seconds
             hop_duration: Hop duration in seconds
+            save_offset: Offset after detection window in seconds
         
         Yields:
-            Tuple of (window_audio, start_time, end_time)
+            Tuple of (window_audio, start_time, end_time, save_fragment)
         """
         y, sr = librosa.load(audio_path, sr=SAMPLE_RATE)
         window_samples = int(SAMPLE_RATE * window_duration)
         hop_samples = int(SAMPLE_RATE * hop_duration)
+        offset_samples = int(SAMPLE_RATE * save_offset)
+        total_needed = window_samples + offset_samples + window_samples
         
-        for start in range(0, len(y) - window_samples + 1, hop_samples):
+        for start in range(0, len(y) - total_needed + 1, hop_samples):
             end = start + window_samples
             window = y[start:end]
+            save_start = end + offset_samples
+            save_fragment = y[save_start:save_start + window_samples]
             start_time = start / SAMPLE_RATE
             end_time = end / SAMPLE_RATE
-            yield window, start_time, end_time
+            yield window, start_time, end_time, save_fragment
     
     def save_audio(self, audio: np.ndarray, output_path: Path, sr: int = SAMPLE_RATE) -> bool:
         """

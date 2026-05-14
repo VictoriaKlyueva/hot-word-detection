@@ -7,7 +7,7 @@ import miniaudio
 import numpy as np
 import soundfile as sf
 
-from src.constants import EXTRACTED_PATH, HOP_DURATION, RADIO_URL, SAMPLE_RATE, THRESHOLD, WINDOW_DURATION
+from src.constants import EXTRACTED_PATH, HOP_DURATION, RADIO_URL, SAMPLE_RATE, SAVE_OFFSET, THRESHOLD, WINDOW_DURATION
 from src.utils.logger import logger
 
 
@@ -24,7 +24,8 @@ class RadioService:
                         threshold: float, output_dir: Path, found_count: int,
                         last_predict_log: float) -> tuple:
         """Process audio buffer with sliding window."""
-        while len(buffer) >= self.window_samples:
+        offset_samples = int(self.sample_rate * SAVE_OFFSET)
+        while len(buffer) >= self.window_samples + offset_samples + self.window_samples:
             window = buffer[:self.window_samples]
             prediction, confidence = self.model.predict(window)
             logger.debug(f"Predict: pos={stream_position:.2f}s, class={prediction}, conf={confidence:.3f}")
@@ -36,9 +37,11 @@ class RadioService:
             
             if prediction == 1 and confidence >= threshold:
                 found_count += 1
+                save_start = self.window_samples + offset_samples
+                save_fragment = buffer[save_start:save_start + self.window_samples]
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
                 output_name = f"stones_{timestamp}_{stream_position:.2f}s_conf{confidence:.2f}.wav"
-                sf.write(output_dir / output_name, window, self.sample_rate)
+                sf.write(output_dir / output_name, save_fragment, self.sample_rate)
                 logger.info(f"DETECTED at {stream_position:.2f}s: confidence={confidence:.2f}, saved={output_name}")
             
             buffer = buffer[self.hop_samples:]

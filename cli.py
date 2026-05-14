@@ -35,13 +35,13 @@ def cmd_predict(args):
     logger.info(f"Processing: {audio_path.name}")
     
     found_count = 0
-    for window, start_time, end_time in audio_service.extract_windows(audio_path):
+    for window, start_time, end_time, save_fragment in audio_service.extract_windows(audio_path):
         prediction, confidence = model.predict(window)
         
         if prediction == 1 and confidence >= args.threshold:
             found_count += 1
             output_name = f"{audio_path.stem}_{start_time:.2f}-{end_time:.2f}.wav"
-            audio_service.save_audio(window, output_dir / output_name)
+            audio_service.save_audio(save_fragment, output_dir / output_name)
             logger.info(f"Found: {output_name} (confidence: {confidence:.2f})")
     
     if found_count == 0:
